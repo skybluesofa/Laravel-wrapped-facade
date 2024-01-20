@@ -18,36 +18,48 @@ use Tests\ExampleClasses\WrappedApiRepository;
  */
 class WrappedFacadeTest extends TestCase
 {
-    public function x_testIndexIsCold(): void
+    public function testIndexIsCold(): void
     {
-        Cache::spy();
-        Log::spy();
-
-        WrappedApiRepository::index();
-
-        Cache::shouldHaveReceived('get')
-            ->once()
-            ->with('ApiRepository.cachedResults');
+        Cache::shouldReceive('get')
+            ->with('wrapped-facade.prefixes')
+            ->andReturn(null);
         Cache::shouldReceive('set')
-            ->once()
-            ->withArgs(['ApiRepository.cachedResults', [
-                '1' => 'Apple',
-                '2' => 'Banana',
-                '3' => 'Carrot',
-                '4' => 'Durifruit',
-                '5' => 'Eggplant',
-            ]]);
+            ->with('wrapped-facade.prefixes', ['pre' => 'pre', 'post' => 'post']);
+        Cache::shouldReceive('get')
+            ->with('ApiRepository.cachedResults')
+            ->andReturn(null);
+        Cache::shouldReceive('get')
+            ->with('wrapped-facade.shouldLog')
+            ->andReturn(true);
+        Cache::shouldReceive('set')
+            ->with(
+                'ApiRepository.cachedResults',
+                [1 => 'Apple', 2 => 'Banana', 3 => 'Carrot', 4 => 'Durifruit', 5 => 'Eggplant']
+            );
 
-        Log::shouldHaveReceived('info')
-            ->twice();
-        Log::shouldHaveReceived('info')
-            ->with('ApiRepository cache has expired');
-        Log::shouldHaveReceived('info')
-            ->with('Caching ApiRepository data');
+        $expectedResults = [
+            '1' => 'Apple',
+            '2' => 'Banana',
+            '3' => 'Carrot',
+            '4' => 'Durifruit',
+            '5' => 'Eggplant',
+        ];
+
+        $actualResults = WrappedApiRepository::index();
+        $this->assertSame($expectedResults, $actualResults);
     }
 
     public function testIndexCacheIsWarm(): void
     {
+        Cache::shouldReceive('get')
+            ->with('wrapped-facade.prefixes')
+            ->andReturn(null);
+        Cache::shouldReceive('set')
+            ->with('wrapped-facade.prefixes', ['pre' => 'pre', 'post' => 'post']);
+        Cache::shouldReceive('get')
+            ->with('wrapped-facade.shouldLog')
+            ->andReturn(true);
+
         $expectedResults = [
             'Automobile',
             'Boomerang',
@@ -55,19 +67,19 @@ class WrappedFacadeTest extends TestCase
             'Dog',
             'Efficiency',
         ];
+        Cache::shouldReceive('set')
+            ->with('ApiRepository.cachedResults', $expectedResults);
         Cache::set('ApiRepository.cachedResults', $expectedResults);
+        Cache::shouldReceive('get')
+            ->with('ApiRepository.cachedResults')
+            ->andReturn($expectedResults);
 
-        Log::spy();
+        WrappedApiRepository::spy();
 
         $actualResults = WrappedApiRepository::index();
+
         $this->assertSame($expectedResults, $actualResults);
 
-        Log::shouldHaveReceived('info')
-            ->twice();
-        Log::shouldHaveReceived('info')
-            ->with('Returning cached ApiRepository data');
-        Log::shouldHaveReceived('info')
-            ->with('ApiRepository data was alredy in the cache');
     }
 
     /**
@@ -89,7 +101,7 @@ class WrappedFacadeTest extends TestCase
             ->times($numberOfLoggingCalls);
     }
 
-    public function provideLoggingInformation(): array
+    public static function provideLoggingInformation(): array
     {
         return [
             'log NO environments' => [
@@ -100,7 +112,7 @@ class WrappedFacadeTest extends TestCase
             'log all environments' => [
                 'set_environment' => 'testing',
                 'environments' => '*',
-                'logFacadeInfoCalls' => 5,
+                'logFacadeInfoCalls' => 6,
             ],
             'only log production' => [
                 'set_environment' => 'testing',
@@ -115,12 +127,12 @@ class WrappedFacadeTest extends TestCase
             'log in testing' => [
                 'set_environment' => 'testing',
                 'environments' => 'testing',
-                'logFacadeInfoCalls' => 5,
+                'logFacadeInfoCalls' => 6,
             ],
             'log in dev and testing' => [
                 'set_environment' => 'testing',
                 'environments' => ['dev', 'testing'],
-                'logFacadeInfoCalls' => 5,
+                'logFacadeInfoCalls' => 6,
             ],
         ];
     }

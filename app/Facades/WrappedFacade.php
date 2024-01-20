@@ -2,9 +2,12 @@
 
 namespace SkyBlueSofa\WrappedFacade\Facades;
 
+use DomainException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 abstract class WrappedFacade extends Facade
@@ -19,19 +22,19 @@ abstract class WrappedFacade extends Facade
     public static function __callStatic($method, $args)
     {
         try {
-            $results = static::callFlowMethod('pre', $method, [$args]) ?? null;
+            $results = static::callSideloadedMethods('pre', $method, [$args]) ?? null;
 
             // If the results are NULL, we'll run the Facade method
             // If the results are a callable, we'll run it and get the results
             if (! is_callable($results)) {
-                static::logFlow('on', $method, $args);
+                static::logSideloadedMethodCalled($method, $args, false);
                 $results = parent::__callStatic($method, $args);
             } else {
-                static::logFlow('skip', $method, $args);
+                static::logSideloadedMethodCalled($method, $args);
                 $results = $results($method, $args);
             }
 
-            $results = static::callFlowMethod('post', $method, [$args, $results]) ?? $results;
+            $results = static::callSideloadedMethods('post', $method, $args, $results) ?? $results;
         } catch (Throwable $e) {
             Log::error(static::class.'::'.$method.' call threw exception');
             throw $e;
@@ -40,59 +43,107 @@ abstract class WrappedFacade extends Facade
         return $results;
     }
 
-    protected static function callFlowMethod(string $prefix, $method, $args): mixed
+    protected static function callSideloadedMethods(string $prefix, $method, $args, $results = null): mixed
     {
-        if (! static::hasFlowMethod($prefix, $method)) {
-            return null;
+        $prefix = static::buildSideloadedPrefixes()[$prefix];
+
+        $baseSideloadedMethodName = static::getBaseSideloadedMethodName($prefix, $method);
+        $sideloadedMethods = static::sortSideloadedPrefixMethodsNames($baseSideloadedMethodName, array_filter(
+            get_class_methods(static::class),
+            function ($value) use ($baseSideloadedMethodName) {
+                return Str::startsWith($value, $baseSideloadedMethodName);
+            }
+        ));
+
+        foreach ($sideloadedMethods as $sideloadedMethodName) {
+            static::logSideloadedMethodCalled($sideloadedMethodName, $args);
+            $results = call_user_func_array(
+                [static::class, $sideloadedMethodName],
+                [$args, $results]
+            );
         }
 
-        static::logFlow(static::buildFlowPrefixes()[$prefix], $method, $args);
-
-        return call_user_func_array(
-            [static::class, static::getFlowMethodName($prefix, $method)],
-            $args
-        );
+        return $results;
     }
 
-    protected static function hasFlowMethod(string $prefix, $method): bool
+    protected static function buildSideloadedPrefixes(): array
     {
-        return method_exists(static::class, static::getFlowMethodName($prefix, $method));
-    }
+        if (! $prefixes = Cache::get('wrapped-facade.prefixes')) {
+            $prefixes = Config::get('wrapped-facade.prefixes');
+            $facadePrefixes = (property_exists(static::class, 'sideloadedPrefixes')) ?
+                get_class_vars(static::class)['sideloadedPrefixes'] :
+                [];
 
-    protected static function buildFlowPrefixes(): array
-    {
-        $prefixes = Config::get('wrapped-facade.prefixes');
-        $facadePrefixes = (property_exists(static::class, 'flowPrefixes')) ?
-            static::$flowPrefixes :
-            [];
+            $prefixes['pre'] = $prefixes['pre'] ?? ($facadePrefixes['pre'] ?? 'pre');
+            $prefixes['post'] = $prefixes['post'] ?? ($facadePrefixes['post'] ?? 'post');
 
-        $prefixes['pre'] = $prefixes['pre'] ?? ($facadePrefixes['pre'] ?? 'pre');
-        $prefixes['post'] = $prefixes['post'] ?? ($facadePrefixes['post'] ?? 'post');
+            Cache::set('wrapped-facade.prefixes', $prefixes);
+        }
 
         return $prefixes;
     }
 
-    protected static function getFlowMethodName(string $prefix, string $methodName): string
+    protected static function sortSideloadedPrefixMethodsNames(string $prefix, array $sideloadedMethods): array
+    {
+        if (! property_exists(static::class, 'sideloadedMethodOrder')) {
+            return $sideloadedMethods;
+        }
+
+        $sideloadedMethodOrder = get_class_vars(static::class)['sideloadedMethodOrder'];
+        if (! is_array($sideloadedMethodOrder)) {
+            throw new DomainException(static::class.'::sideloadedMethodOrder expects an array.');
+        }
+
+        if (isset($sideloadedMethodOrder[$prefix]) && is_array($sideloadedMethodOrder[$prefix])) {
+            $sideloadedMethodOrder = $sideloadedMethodOrder[$prefix];
+        }
+
+        $sideloadedMethodOrder = array_filter($sideloadedMethodOrder, function ($value) use ($prefix) {
+            if (is_array($value)) {
+                return false;
+            }
+
+            return Str::startsWith($value, $prefix);
+        });
+
+        $sideloadedMethods = array_merge(
+            array_intersect($sideloadedMethodOrder, $sideloadedMethods),
+            array_diff($sideloadedMethods, $sideloadedMethodOrder),
+        );
+
+        return $sideloadedMethods;
+    }
+
+    protected static function getBaseSideloadedMethodName(string $prefix, string $methodName): string
     {
         return $prefix.ucfirst($methodName);
     }
 
-    protected static function flowShouldLog(): bool
-    {
-        $loggedEnvironments = Config::get('wrapped-facade.log_in_environment');
-        $currentEnvironment = Config::get('app.env');
-
-        return (
-            ($loggedEnvironments === '*') ||
-            ($loggedEnvironments === $currentEnvironment) ||
-            (is_array($loggedEnvironments) && in_array($currentEnvironment, $loggedEnvironments))
-        ) ? true : false;
+    protected static function logSideloadedMethodCalled(
+        string $sideloadedMethodName,
+        array $args,
+        bool $isToBeRun = true
+    ): void {
+        if (static::shouldLogSideloadedMethodCalls()) {
+            Log::info(static::class.'::'.$sideloadedMethodName.' '.($isToBeRun ? 'called' : 'skipped'));
+        }
     }
 
-    protected static function logFlow(string $step, string $methodName, array $args): void
+    protected static function shouldLogSideloadedMethodCalls(): bool
     {
-        if (static::flowShouldLog()) {
-            Log::info(static::class.'::'.static::getFlowMethodName($step, $methodName).' called');
+        if (is_null($shouldLog = Cache::get('wrapped-facade.shouldLog'))) {
+            $loggedEnvironments = Config::get('wrapped-facade.log_in_environment');
+            $currentEnvironment = Config::get('app.env');
+
+            $shouldLog = (
+                ($loggedEnvironments === '*') ||
+                ($loggedEnvironments === $currentEnvironment) ||
+                (is_array($loggedEnvironments) && in_array($currentEnvironment, $loggedEnvironments))
+            ) ? true : false;
+
+            Cache::set('wrapped-facade.shouldLog', $shouldLog);
         }
+
+        return $shouldLog;
     }
 }

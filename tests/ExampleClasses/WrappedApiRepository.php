@@ -15,10 +15,25 @@ class WrappedApiRepository extends WrappedFacade
 
     protected static $apiCachedResults = null;
 
+    protected static $sideloadedMethodOrder = [
+        'preIndex' => [
+            'preIndexValidate',
+            'preIndex',
+        ],
+        'postIndex',
+    ];
+
+    protected static function preIndexValidate(array $args, mixed $results = null): ?callable
+    {
+        return function () use ($results) {
+            return $results;
+        };
+    }
+
     /**
      * Runs before we actually hit the ApiRepository::index() method
      */
-    protected static function preIndex(array $args): ?callable
+    protected static function preIndex(array $args, mixed $results = null): ?callable
     {
         // Check if we have the results cached
         $apiCachedResults = Cache::get('ApiRepository.cachedResults');

@@ -153,7 +153,7 @@ but the next time it's accessed, it will be returned from the cache.
 // Returns an array of fruits, just as we'd expect
 ```
 
-#### Example: Modifying Results 
+#### Example: Modifying Results
 
 In this example, we're not going to cache the results. Instead we're going to filter the results
 based on the preferences of the logged in user.
@@ -200,4 +200,90 @@ but it 'Banana' has been removed from the array.
     3 => 'Durifruit',
     4 => 'Eggplant',
 ]
+```
+
+#### Example: Using Multiple Sideloaded Functionality
+
+In this example, we're going to validate the results before we cache them. 
+
+We'll update the class to include a new 'postIndexValidate' method and a 'sideloadedMethodOrder' property:
+
+```
+<?php
+namespace App\Facades;
+
+use App\Fruits;
+use App\FruitValidator;
+use SkyBlueSofa\WrappedFacade\Facades\WrappedFacade;
+
+class SuperFruits extends WrappedFacade
+{
+    public static function getFacadeAccessor()
+    {
+        return Fruits::class;
+    }
+
+    protected static $sideloadedMethodOrder = [
+        'postIndexValidate',
+        'postIndex',
+    ];
+
+    protected static function postIndexValidate(array $args, mixed $results): mixed
+    {
+        // This is an example validator. How it works really doesn't matter.
+        $fruitValidator = new FruitValidator($results);
+
+        if (! $fruitValidator->validates()) {
+            throw new \RuntimeException('Fruit does not validate!');
+        }
+
+        return $results;
+    }
+
+    protected static function postIndex(array $args, mixed $results): mixed
+    {
+        // In this example , the user hates 'Banana'
+        $hatedFruit = Auth::user()->mostHatedFruit; 
+
+        return array_diff(
+            $results,
+            [$hatedFruit]
+        );
+    }
+}
+```
+
+We're going to assume that `FruitValidator::validates()` will return `false`. So now when you run the facade code, a `\RuntimeException` will be thrown.
+
+```
+\App\Classes\SuperFruitsSuperFruits::getAll();
+
+// RuntimeException('Fruit does not validate!');
+```
+
+Please note that the `$sideloadedMethodOrder` array can be formatted in multiple ways.
+All of these are equally valid:
+
+```
+// If you don't care what order things are run in:
+// Don't add the $sideloadedMethodOrder property at all, or:
+protected static $sideloadedMethodOrder = [];
+
+// If you have only a few sideloaded methods, a simple array might be easiest.
+// The array lists the specific sideloaded method names:
+protected static $sideloadedMethodOrder = [
+    'postIndexValidate',
+    'postIndex',
+];
+
+// If you have quite a few sideloaded methods, a nested array might be clearer.
+// The first level of the array is the sideloaded key (<pre|post> + <methodName>).
+// The second level of the array lists the specific sideloaded method names:
+protected static $sideloadedMethodOrder = [
+    'postIndex' => [
+        'postIndexValidate',
+        'postIndex',
+    ],
+];
+
 ```
