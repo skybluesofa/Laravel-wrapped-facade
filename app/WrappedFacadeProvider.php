@@ -2,15 +2,15 @@
 
 namespace SkyBlueSofa\WrappedFacade;
 
-use Illuminate\Contracts\Support\DeferrableProvider;
-use Illuminate\Support\ServiceProvider;
+use Spatie\LaravelPackageTools\Package;
+use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class WrappedFacadeProvider extends ServiceProvider implements DeferrableProvider
+class WrappedFacadeProvider extends PackageServiceProvider
 {
-    public function boot()
+    public function configurePackage(Package $package): void
     {
-        $this->publishes([
-            __DIR__.'/../config/wrapped-facade.php' => config_path('wrapped-facade.php'),
-        ], 'wrapped-facade');
+        $package
+            ->name('laravel-wrapped-facade')
+            ->hasConfigFile();
     }
 }

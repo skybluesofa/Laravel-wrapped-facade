@@ -1,4 +1,4 @@
-# laravel Wrapped-Facade
+# Laravel Wrapped-Facade
 Add before- and after- method calls to Facades.
 
 ## Purpose
@@ -26,7 +26,7 @@ composer require skybluesofa/laravel-wrapped-facade
 Run the artisan command to publish the package's config file:
 
 ```
-php artisan vendor:publish --tag=wrapped-facade
+php artisan vendor:publish --tag=wrapped-facade-config
 ```
 
 _or_
